@@ -1,0 +1,38 @@
+services:
+  db:
+    image: docker.m.daocloud.io/library/mysql:8.0
+    container_name: ddz-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "ddz"
+    volumes:
+      - ddz-mysql:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123456"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  app:
+    image: doudizhu:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: docker.m.daocloud.io/library/ubuntu:22.04
+    container_name: ddz-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:23401:8080"
+    volumes:
+      - ddz-log:/app/log
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  ddz-mysql:
+  ddz-log:

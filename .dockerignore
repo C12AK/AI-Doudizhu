@@ -1,0 +1,26 @@
+# shellcheck disable=all
+.git
+**/.git
+**/.gitignore
+.cursor
+**/.cursor
+server/cmake-build
+server/lib
+server/deploy/bin
+server/deploy/log
+web/deploy/www
+server/3rd/json/tests
+server/3rd/json/docs
+server/3rd/json/benchmarks
+server/3rd/asio/asio/src
+server/3rd/websocketpp/test
+server/3rd/websocketpp/examples
+server/3rd/websocketpp/docs
+server/3rd/websocketpp/tutorials
+server/3rd/spdlog/tests
+server/3rd/spdlog/bench
+server/3rd/spdlog/example
+.env
+doudizhu-image.tar.gz
+scripts/env.sh
+**/*.md

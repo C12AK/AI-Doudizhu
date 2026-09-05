@@ -1,0 +1,6 @@
+cmake-build/
+deploy/bin/ddz-server
+deploy/bin/ddz-cards-test
+deploy/log/*.log
+lib/*.a
+lib/*.so

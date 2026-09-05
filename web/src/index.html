@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>斗地主</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div id="toast" hidden></div>
+
+  <section id="view-login" class="view">
+    <form id="form-login">
+      <h1>斗地主</h1>
+      <label>账号<input id="username" autocomplete="username" value="" /></label>
+      <label>密码<input id="password" type="password" autocomplete="current-password" value="" /></label>
+      <button type="submit">进入</button>
+    </form>
+    </form>
+  </section>
+
+  <section id="view-game" class="view" hidden>
+    <header class="topbar">
+      <div id="meta"></div>
+      <div class="topbar-right">
+        <div id="mult"></div>
+        <button id="btn-leave" type="button" class="ghost">离开</button>
+      </div>
+    </header>
+    <div id="seats" class="seats"></div>
+    <div class="pile">
+      <div class="pile-label" id="bottom-label">底牌</div>
+      <div id="bottom-cards" class="card-row spread"></div>
+    </div>
+    <div class="pile">
+      <div class="pile-label" id="last-label"></div>
+      <div id="last-cards" class="card-row overlap compact"></div>
+    </div>
+    <div id="hand" class="card-row overlap hand"></div>
+    <div id="actions" class="actions"></div>
+  </section>
+
+  <div id="spring-flash" class="modal" hidden>
+    <div class="panel spring-panel">
+      <div id="spring-text"></div>
+    </div>
+  </div>
+
+  <div id="settle" class="modal" hidden>
+    <div class="panel">
+      <h2 id="settle-title"></h2>
+      <p id="settle-detail"></p>
+      <button id="btn-again" type="button">再来</button>
+      <button id="btn-leave-settle" type="button" class="ghost">离开</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+ops-scripts/env.sh
+.env
+doudizhu-image.tar.gz
+web/deploy/www/
+server/cmake-build/
+server/lib/
+server/deploy/bin/
+server/deploy/log/

@@ -1,0 +1,14 @@
+CREATE DATABASE IF NOT EXISTS ddz DEFAULT CHARSET utf8mb4;
+USE ddz;
+CREATE TABLE IF NOT EXISTS account (
+  id         INT PRIMARY KEY AUTO_INCREMENT,
+  username   VARCHAR(32) NOT NULL UNIQUE,
+  password   VARCHAR(64) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO account (username, password) VALUES
+  ('p1', '123456'),
+  ('p2', '123456'),
+  ('p3', '123456')
+ON DUPLICATE KEY UPDATE password = VALUES(password);
