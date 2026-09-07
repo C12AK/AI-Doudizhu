@@ -1,11 +1,18 @@
 #include "mysql_handle.h"
 
+#include "log_record.h"
+
 #include <mysql/mysql.h>
 
 #include <cstring>
 
 struct MysqlHandle::Impl {
     MYSQL* conn = nullptr;
+    std::string host;
+    std::uint16_t port = 0;
+    std::string user;
+    std::string password;
+    std::string database;
 };
 
 MysqlHandle::~MysqlHandle() {
@@ -17,16 +24,25 @@ MysqlHandle::~MysqlHandle() {
     }
 }
 
-bool MysqlHandle::connect(const std::string& host, std::uint16_t port, const std::string& user,
-                          const std::string& password, const std::string& database) {
-    impl_ = new Impl();
+bool MysqlHandle::open_conn() {
+    if (!impl_) {
+        return false;
+    }
+
+    if (impl_->conn) {
+        mysql_close(impl_->conn);
+        impl_->conn = nullptr;
+    }
+
     impl_->conn = mysql_init(nullptr);
     if (!impl_->conn) {
         return false;
     }
 
-    if (!mysql_real_connect(impl_->conn, host.c_str(), user.c_str(), password.c_str(), database.c_str(),
-                            port, nullptr, 0)) {
+    if (!mysql_real_connect(impl_->conn, impl_->host.c_str(), impl_->user.c_str(), impl_->password.c_str(),
+                            impl_->database.c_str(), impl_->port, nullptr, 0)) {
+        mysql_close(impl_->conn);
+        impl_->conn = nullptr;
         return false;
     }
 
@@ -34,8 +50,41 @@ bool MysqlHandle::connect(const std::string& host, std::uint16_t port, const std
     return true;
 }
 
+bool MysqlHandle::connect(const std::string& host, std::uint16_t port, const std::string& user,
+                          const std::string& password, const std::string& database) {
+    if (!impl_) {
+        impl_ = new Impl();
+    }
+
+    impl_->host = host;
+    impl_->port = port;
+    impl_->user = user;
+    impl_->password = password;
+    impl_->database = database;
+    return open_conn();
+}
+
+bool MysqlHandle::ensure_conn() {
+    if (!impl_) {
+        return false;
+    }
+
+    if (impl_->conn && mysql_ping(impl_->conn) == 0) {
+        return true;
+    }
+
+    log_warn("mysql ping failed, reconnecting");
+    if (!open_conn()) {
+        log_error("mysql reconnect failed");
+        return false;
+    }
+
+    log_info("mysql reconnected");
+    return true;
+}
+
 std::optional<AccountRow> MysqlHandle::login(const std::string& username, const std::string& password) {
-    if (!impl_ || !impl_->conn) {
+    if (!ensure_conn()) {
         return std::nullopt;
     }
 

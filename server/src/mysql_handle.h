@@ -33,6 +33,12 @@ public:
     std::optional<AccountRow> login(const std::string& username, const std::string& password);
 
 private:
+    // 按已保存的参数建立或重建连接。无参数。返回：连上为 true。
+    bool open_conn();
+
+    // 登录前确认连接仍可用，断了则重连。无参数。返回：可用为 true。
+    bool ensure_conn();
+
     struct Impl;
     Impl* impl_ = nullptr;
 };
