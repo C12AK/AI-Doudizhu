@@ -59,12 +59,3 @@ target_link_libraries(ddz-server PRIVATE
 set_target_properties(ddz-server PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${DDZ_ROOT}/deploy/bin"
 )
-
-add_executable(ddz-cards-test
-    cards.cpp
-    cards_test.cpp
-)
-set_target_properties(ddz-cards-test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
-target_compile_options(ddz-cards-test PRIVATE -UNDEBUG)

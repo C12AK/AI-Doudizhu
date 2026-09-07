@@ -30,6 +30,21 @@ std::array<int, 18> counts_of(const std::vector<Card>& cards) {
     return cnt;
 }
 
+// 是否含大小王。cnt：张数表。含王为 true。
+bool contains_joker(const std::array<int, 18>& cnt) {
+    return cnt[RANK_X] != 0 || cnt[RANK_D] != 0;
+}
+
+// 3～2 是否有某点至少 4 张。cnt：张数表。有则为 true。
+bool contains_four(const std::array<int, 18>& cnt) {
+    for (int r = RANK_3; r <= RANK_2; ++r) {
+        if (cnt[static_cast<std::size_t>(r)] >= 4) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // 点数是否从 3 到 A、无重复、且相邻差 1。2 和王不能出现。
 // ranks：待检查的点数。满足则为 true。
 bool consecutive_3_to_a(const std::vector<int>& ranks) {
@@ -140,18 +155,21 @@ std::optional<int> match_trio_solo(const std::vector<Card>& cards) {
     auto cnt = counts_of(cards);
     int body = 0;
     int others = 0;
-    for (int r = RANK_3; r <= RANK_D; ++r) {
+    for (int r = RANK_3; r <= RANK_2; ++r) {
         int n = cnt[static_cast<std::size_t>(r)];
         if (n == 0) {
             continue;
         }
-        if (n == 3 && r <= RANK_2 && body == 0) {
+        if (n == 3 && body == 0) {
             body = r;
         } else {
             others += n;
         }
     }
 
+    if (contains_joker(cnt)) {
+        return std::nullopt;
+    }
     if (body != 0 && others == 1) {
         return body;
     }
@@ -298,12 +316,12 @@ std::optional<int> match_four_solo(const std::vector<Card>& cards) {
             body = r;
         }
     }
-    if (body == 0) {
+    if (body == 0 || contains_joker(cnt)) {
         return std::nullopt;
     }
 
     int rest = 0;
-    for (int r = RANK_3; r <= RANK_D; ++r) {
+    for (int r = RANK_3; r <= RANK_2; ++r) {
         if (r == body) {
             continue;
         }
@@ -360,13 +378,17 @@ std::optional<int> match_plane_solo(const std::vector<Card>& cards) {
     }
 
     auto cnt = counts_of(cards);
+    if (contains_joker(cnt) || contains_four(cnt)) {
+        return std::nullopt;
+    }
+
     int best = 0;
     bool found = false;
-    // 滑动窗口：每一段连续 n 个点数都至少 3 张，当作主体。
+    // 滑动窗口：每一段连续 n 个点数都恰好 3 张，当作主体。
     for (int start = RANK_3; start + n - 1 <= RANK_A; ++start) {
         bool ok = true;
         for (int i = 0; i < n; ++i) {
-            if (cnt[static_cast<std::size_t>(start + i)] < 3) {
+            if (cnt[static_cast<std::size_t>(start + i)] != 3) {
                 ok = false;
                 break;
             }
@@ -386,19 +408,20 @@ std::optional<int> match_plane_solo(const std::vector<Card>& cards) {
             continue;
         }
 
-        // 翅膀不能落在主体窗口内；同一点数不能超过 3 张。
+        // 翅膀不能落在主体窗口内，也不能是贴着机身的三张。
         bool wings_ok = true;
         int wing_cards = 0;
-        for (int r = RANK_3; r <= RANK_D; ++r) {
+        const int hi = start + n - 1;
+        if ((start > RANK_3 && rem[static_cast<std::size_t>(start - 1)] >= 3) ||
+            (hi < RANK_A && rem[static_cast<std::size_t>(hi + 1)] >= 3)) {
+            continue;
+        }
+        for (int r = RANK_3; r <= RANK_2; ++r) {
             int c = rem[static_cast<std::size_t>(r)];
             if (c == 0) {
                 continue;
             }
-            if (r >= start && r <= start + n - 1) {
-                wings_ok = false;
-                break;
-            }
-            if (c > 3) {
+            if (r >= start && r <= hi) {
                 wings_ok = false;
                 break;
             }
@@ -409,7 +432,7 @@ std::optional<int> match_plane_solo(const std::vector<Card>& cards) {
         }
 
         found = true;
-        best = std::max(best, start + n - 1);
+        best = std::max(best, hi);
     }
 
     if (!found) {
@@ -430,6 +453,10 @@ std::optional<int> match_plane_pair(const std::vector<Card>& cards) {
     }
 
     auto cnt = counts_of(cards);
+    if (contains_joker(cnt) || contains_four(cnt)) {
+        return std::nullopt;
+    }
+
     int best = 0;
     bool found = false;
     for (int start = RANK_3; start + n - 1 <= RANK_A; ++start) {
