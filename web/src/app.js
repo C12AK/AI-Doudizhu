@@ -312,6 +312,7 @@
     e.preventDefault();
     doLogin();
   };
+  $("btn-register").onclick = () => toast("该功能暂未上线");
   $("btn-again").onclick = () => send({ op: "again" });
   $("btn-leave").onclick = $("btn-leave-settle").onclick = () => send({ op: "leave" });
 

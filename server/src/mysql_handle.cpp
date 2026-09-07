@@ -94,7 +94,8 @@ std::optional<AccountRow> MysqlHandle::login(const std::string& username, const 
     }
 
     // 准备查询语句。
-    const char* sql = "SELECT id, username FROM account WHERE username=? AND password=? LIMIT 1";
+    // 库里存的是用户名和密码各自的 SHA1，用表单字段算 SHA1 再比对。
+    const char* sql = "SELECT id FROM account WHERE username=SHA1(?) AND password=SHA1(?) LIMIT 1";
     if (mysql_stmt_prepare(stmt, sql, static_cast<unsigned long>(std::strlen(sql))) != 0) {
         mysql_stmt_close(stmt);
         return std::nullopt;
@@ -121,17 +122,11 @@ std::optional<AccountRow> MysqlHandle::login(const std::string& username, const 
         return std::nullopt;
     }
 
-    // 取出编号和用户名。
+    // 取出编号。展示用的用户名仍用表单明文，不把库里的 SHA1 拿去显示。
     int id = 0;
-    char uname[33]{};
-    unsigned long uname_len = 0;
-    MYSQL_BIND out[2]{};
+    MYSQL_BIND out[1]{};
     out[0].buffer_type = MYSQL_TYPE_LONG;
     out[0].buffer = &id;
-    out[1].buffer_type = MYSQL_TYPE_STRING;
-    out[1].buffer = uname;
-    out[1].buffer_length = 32;
-    out[1].length = &uname_len;
     if (mysql_stmt_bind_result(stmt, out) != 0) {
         mysql_stmt_close(stmt);
         return std::nullopt;
@@ -144,6 +139,6 @@ std::optional<AccountRow> MysqlHandle::login(const std::string& username, const 
 
     AccountRow row;
     row.id = id;
-    row.username.assign(uname, uname_len);
+    row.username = username;
     return row;
 }
