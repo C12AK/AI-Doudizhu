@@ -13,7 +13,7 @@
 
   const ranks = { 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "J", 12: "Q", 13: "K", 14: "A", 15: "2" };
   const suits = ["♠", "♥", "♣", "♦"];
-  const phases = { hall: "大厅", lobby: "准备", call: "叫地主", rob: "抢地主", double: "加倍", play: "出牌", settle: "结算", set_over: "大局结束" };
+  const phases = { hall: "大厅", lobby: "准备", dealing: "发牌中", call: "叫地主", rob: "抢地主", double: "加倍", play: "出牌", settle: "结算", set_over: "大局结束" };
 
   function savedUser() { return sessionStorage.getItem("ddz_user") || ""; }
   function savedPass() { return sessionStorage.getItem("ddz_pass") || ""; }
@@ -167,7 +167,7 @@
   function matchLabel(st) {
     const total = st.match_total || 1;
     const done = st.match_done || 0;
-    const playing = st.phase === "call" || st.phase === "rob" || st.phase === "double" || st.phase === "play";
+    const playing = st.phase === "call" || st.phase === "rob" || st.phase === "double" || st.phase === "play" || st.phase === "dealing";
     const finished = playing ? Math.max(0, done - 1) : done;
     return `${finished}/${total}`;
   }
@@ -363,6 +363,12 @@
     act.innerHTML = "";
     if (state.can_ready) addBtn(act, "准备", () => send({ op: "ready" }));
     if (state.can_unready) addBtn(act, "取消准备", () => send({ op: "unready" }), true);
+    if (state.phase === "dealing") {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "正在评估发牌…";
+      act.appendChild(p);
+    }
     if (state.can_call) {
       addBtn(act, "叫地主", () => send({ op: "call", yes: true }));
       addBtn(act, "不叫", () => send({ op: "call", yes: false }), true);

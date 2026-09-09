@@ -9,20 +9,8 @@ constexpr const char* kCannot = "现在不能做该操作";
 
 Game::Game(int base_score) : base_score_(base_score < 1 ? 1 : base_score) {}
 
-void Game::deal_cards() {
-    auto deck = ddz::full_deck();
-    ddz::shuffle_deck(deck);
-
-    for (int s = 0; s < 3; ++s) {
-        hands_[static_cast<std::size_t>(s)].assign(deck.begin() + s * 17, deck.begin() + (s + 1) * 17);
-        ddz::sort_hand(hands_[static_cast<std::size_t>(s)]);
-    }
-
-    bottom_.assign(deck.begin() + 51, deck.end());
-    bottom_revealed_ = false;
-}
-
-void Game::start_deal(int first_caller) {
+void Game::start_deal(int first_caller, const std::array<std::vector<ddz::Card>, 3>& hands,
+                     const std::vector<ddz::Card>& bottom) {
     first_caller_ = first_caller;
     caller_ = -1;
     landlord_ = -1;
@@ -42,8 +30,9 @@ void Game::start_deal(int first_caller) {
     spring_ = "none";
     phase_ = Phase::Call;
     call_redeal_ = false;
-
-    deal_cards();
+    hands_ = hands;
+    bottom_ = bottom;
+    bottom_revealed_ = false;
 }
 
 int Game::next_rob_actor(int from) const {
@@ -160,7 +149,6 @@ bool Game::on_call(int seat, bool yes, std::string& err) {
     int n = next_seat(seat);
     // 转回首叫座位，说明三人都过了，流局重发。
     if (n == first_caller_) {
-        start_deal(ddz::random_int(0, 2));
         call_redeal_ = true;
         return true;
     }

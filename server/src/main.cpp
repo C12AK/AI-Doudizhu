@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
     log_info("www_root=" + cfg.www_root);
     log_info("mysql " + cfg.mysql_user + "@" + cfg.mysql_host + ":" + std::to_string(cfg.mysql_port) +
              "/" + cfg.mysql_database);
+    log_info("deepseek model=" + cfg.deepseek_model + " url=" + cfg.deepseek_url);
 
     MysqlHandle db;
     if (!db.connect(cfg.mysql_host, cfg.mysql_port, cfg.mysql_user, cfg.mysql_password, cfg.mysql_database)) {

@@ -26,6 +26,10 @@ struct Config {
     int retry_max = 3;
     int retry_timeout_sec = 10;
 
+    std::string deepseek_url;
+    std::string deepseek_apikey;
+    std::string deepseek_model = "deepseek-v4-flash";
+
     std::string ini_dir;
 
     // 读配置文件并填入本结构。

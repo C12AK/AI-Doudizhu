@@ -259,6 +259,10 @@ HttpWsServer::TimerId HttpWsServer::defer(int ms, std::function<void()> fn) {
     return id;
 }
 
+void HttpWsServer::post(std::function<void()> fn) {
+    impl_->server.get_io_service().post(std::move(fn));
+}
+
 void HttpWsServer::cancel(TimerId id) {
     auto it = impl_->timers.find(id);
     if (it == impl_->timers.end()) {

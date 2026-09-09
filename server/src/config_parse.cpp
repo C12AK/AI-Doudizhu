@@ -86,11 +86,22 @@ bool Config::load(const std::string& path) {
             } else if (key == "retry_timeout_sec") {
                 retry_timeout_sec = std::stoi(val);
             }
+        } else if (section == "DEEPSEEK") {
+            if (key == "url") {
+                deepseek_url = val;
+            } else if (key == "apikey") {
+                deepseek_apikey = val;
+            } else if (key == "model") {
+                deepseek_model = val;
+            }
         }
     }
 
     www_root = resolve(www_root);
     log_file = resolve(log_file);
+    if (deepseek_model.empty()) {
+        deepseek_model = "deepseek-v4-flash";
+    }
     return true;
 }
 

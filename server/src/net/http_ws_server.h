@@ -57,6 +57,10 @@ public:
     // 返回：定时器编号，可供取消。
     TimerId defer(int ms, std::function<void()> fn);
 
+    // 把函数投到网络线程执行（可从其他线程调用）。
+    // fn：要在事件循环里做的事。无返回值。
+    void post(std::function<void()> fn);
+
     // 取消尚未触发的定时器。id：定时器编号。无返回值。
     void cancel(TimerId id);
 

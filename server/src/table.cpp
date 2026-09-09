@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cctype>
-#include <vector>
+#include <exception>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace {
 // 出牌非法时的固定提示。无参数。返回短句。
@@ -49,7 +51,8 @@ int name_weight(const std::string& s) {
 }
 } // namespace
 
-Table::Table(Config cfg, MysqlHandle& db, HttpWsServer& net) : cfg_(std::move(cfg)), db_(db), net_(net) {}
+Table::Table(Config cfg, MysqlHandle& db, HttpWsServer& net)
+    : cfg_(std::move(cfg)), deal_eval_(cfg_), db_(db), net_(net) {}
 
 void Table::start() {
     heartbeat();
@@ -226,6 +229,8 @@ void Table::on_retry(const std::string& room_id, int seat) {
 }
 
 void Table::abort_game(Room& r, const std::string& reason) {
+    r.dealing = false;
+    r.deal_seq++;
     r.game.reset();
     r.match_done = 0;
     r.set_score = {};
@@ -274,7 +279,7 @@ void Table::on_small_over(Room& r) {
 }
 
 bool Table::match_in_progress(const Room& r) const {
-    return static_cast<bool>(r.game) || r.match_done > 0 || r.set_over;
+    return static_cast<bool>(r.game) || r.dealing || r.match_done > 0 || r.set_over;
 }
 
 void Table::leave_room(Room& r, int seat, HttpWsServer::ConnId id) {
@@ -333,6 +338,9 @@ bool Table::accept_move(HttpWsServer::ConnId id, bool ok, const std::string& err
 }
 
 std::string Table::phase_name(const Room& r) const {
+    if (r.dealing) {
+        return "dealing";
+    }
     if (r.set_over) {
         return "set_over";
     }
@@ -481,14 +489,14 @@ Json Table::snapshot(const Room& r, int viewer) const {
     bool seated = viewer >= 0;
     bool my_turn = seated && r.game && r.game->actor() == viewer;
     bool closed = seated && at(r, viewer).board_closed;
-    j.set("can_ready", seated && !r.game && !at(r, viewer).ready && (!r.set_over || closed));
-    j.set("can_unready", seated && !r.game && at(r, viewer).ready && (!r.set_over || closed));
-    j.set("can_call", my_turn && r.game && r.game->phase() == Game::Phase::Call);
-    j.set("can_rob", my_turn && r.game && r.game->phase() == Game::Phase::Rob);
-    j.set("can_double", seated && r.game && r.game->phase() == Game::Phase::Double &&
+    j.set("can_ready", seated && !r.game && !r.dealing && !at(r, viewer).ready && (!r.set_over || closed));
+    j.set("can_unready", seated && !r.game && !r.dealing && at(r, viewer).ready && (!r.set_over || closed));
+    j.set("can_call", !r.dealing && my_turn && r.game && r.game->phase() == Game::Phase::Call);
+    j.set("can_rob", !r.dealing && my_turn && r.game && r.game->phase() == Game::Phase::Rob);
+    j.set("can_double", seated && !r.dealing && r.game && r.game->phase() == Game::Phase::Double &&
                             !r.game->double_chosen(viewer));
-    j.set("can_play", my_turn && r.game && r.game->phase() == Game::Phase::Play);
-    j.set("can_pass", my_turn && r.game && r.game->phase() == Game::Phase::Play && !r.game->is_lead());
+    j.set("can_play", !r.dealing && my_turn && r.game && r.game->phase() == Game::Phase::Play);
+    j.set("can_pass", !r.dealing && my_turn && r.game && r.game->phase() == Game::Phase::Play && !r.game->is_lead());
     j.set("can_close_board", seated && r.set_over && !closed);
     return j;
 }
@@ -530,6 +538,10 @@ int Table::sit_down(Room& r, HttpWsServer::ConnId id, Session& s) {
 }
 
 void Table::try_start(Room& r) {
+    if (r.dealing) {
+        return;
+    }
+
     for (const auto& s : r.seats) {
         if (!s.occupied || !s.online || !s.ready) {
             return;
@@ -551,12 +563,56 @@ void Table::try_start(Room& r) {
     }
 
     r.match_done++;
-    int first = ddz::random_int(0, 2);
-    r.game = std::make_unique<Game>(cfg_.base_score);
-    r.game->start_deal(first);
     r.last_spring = "none";
     r.last_score = {};
+    begin_async_deal(r, false);
+}
 
+void Table::begin_async_deal(Room& r, bool redeal) {
+    r.dealing = true;
+    r.deal_seq++;
+    const int seq = r.deal_seq;
+    const std::string rid = r.id;
+    const int first = ddz::random_int(0, 2);
+    const std::array<int, 3> scores = r.set_score;
+
+    log_info("room " + rid + (redeal ? " redeal eval" : " dealing eval") + " seq=" + std::to_string(seq));
+    broadcast_state(r, "dealing");
+    broadcast_hall();
+
+    try {
+        std::thread([this, rid, seq, first, scores, redeal]() {
+            DealtPack pack = deal_eval_.make(scores);
+            net_.post([this, rid, seq, first, pack = std::move(pack), redeal]() mutable {
+                on_deal_ready(rid, seq, first, std::move(pack), redeal);
+            });
+        }).detach();
+    } catch (const std::exception& e) {
+        r.dealing = false;
+        log_error(std::string("deal thread failed: ") + e.what());
+    }
+}
+
+void Table::on_deal_ready(const std::string& rid, int seq, int first, DealtPack pack, bool redeal) {
+    Room* rp = find_room(rid);
+    if (!rp || rp->deal_seq != seq || !rp->dealing) {
+        log_info("room " + rid + " drop stale deal seq=" + std::to_string(seq));
+        return;
+    }
+
+    Room& r = *rp;
+    if (redeal) {
+        if (!r.game) {
+            r.dealing = false;
+            return;
+        }
+        r.game->start_deal(first, pack.hands, pack.bottom);
+    } else {
+        r.game = std::make_unique<Game>(cfg_.base_score);
+        r.game->start_deal(first, pack.hands, pack.bottom);
+    }
+
+    r.dealing = false;
     log_info("room " + r.id + " deal " + std::to_string(r.match_done) + "/" +
              std::to_string(r.match_total) + " first_caller=" + at(r, first).username);
     broadcast_state(r, "deal");
@@ -760,7 +816,7 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
         return;
     }
     if (op == "ready") {
-        if (r.game) {
+        if (r.game || r.dealing) {
             send_error(id, "现在不能做该操作");
             return;
         }
@@ -774,12 +830,17 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
         return;
     }
     if (op == "unready") {
-        if (r.game) {
+        if (r.game || r.dealing) {
             send_error(id, "现在不能做该操作");
             return;
         }
         at(r, seat).ready = false;
         broadcast_state(r, phase_name(r));
+        return;
+    }
+
+    if (r.dealing) {
+        send_error(id, "现在不能做该操作");
         return;
     }
 
@@ -795,8 +856,8 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
             return;
         }
         if (r.game->take_call_redeal()) {
-            log_info("流局，重新发牌 first_caller=" + std::to_string(r.game->first_caller()));
-            broadcast_state(r, "deal");
+            log_info("流局，重新发牌");
+            begin_async_deal(r, true);
             return;
         }
         broadcast_state(r, phase_name(r));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config_parse.h"
+#include "deal_eval.h"
 #include "game.h"
 #include "json_util.h"
 #include "mysql_handle.h"
@@ -56,6 +57,8 @@ private:
         std::array<int, 3> last_score{};
         std::array<Seat, 3> seats{};
         std::unique_ptr<Game> game;
+        bool dealing = false;
+        int deal_seq = 0;
     };
 
     struct Session {
@@ -170,8 +173,16 @@ private:
     // 进入已有房间。id：连接。msg：含 room_id。无返回值。
     void enter_room(HttpWsServer::ConnId id, const Json& msg);
 
-    // 三人在线且都准备则发牌（新的一小局）。r：房间。无返回值。
+    // 三人在线且都准备则开始异步发牌（新的一小局）。r：房间。无返回值。
     void try_start(Room& r);
+
+    // 在后台洗牌并问 AI，完成后回到网络线程套牌。
+    // r：房间。redeal：true 表示流局重发，不增加小局计数。无返回值。
+    void begin_async_deal(Room& r, bool redeal);
+
+    // 后台发牌完成。rid：房间号。seq：这次发牌的序号。first：首叫座位。
+    // pack：已评估并按得分分好的牌。redeal：是否流局重发。无返回值。
+    void on_deal_ready(const std::string& rid, int seq, int first, DealtPack pack, bool redeal);
 
     // 检查有没有人太久没说话，并向在线连接发探活。无参数。无返回值。
     void heartbeat();
@@ -180,6 +191,7 @@ private:
     std::string phase_name(const Room& r) const;
 
     Config cfg_;
+    DealEval deal_eval_;
     MysqlHandle& db_;
     HttpWsServer& net_;
     std::unordered_map<HttpWsServer::ConnId, Session> sessions_;

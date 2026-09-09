@@ -23,8 +23,11 @@ public:
     // 记下房间底分。base_score：小于 1 时按 1 用。
     explicit Game(int base_score);
 
-    // 洗牌发牌，进入叫地主。first_caller：首叫座位号 0～2。无返回值。
-    void start_deal(int first_caller);
+    // 套上已洗好的牌，进入叫地主。
+    // first_caller：首叫座位号 0～2。hands：三座各 17 张。bottom：3 张底牌。
+    // 无返回值。
+    void start_deal(int first_caller, const std::array<std::vector<ddz::Card>, 3>& hands,
+                    const std::vector<ddz::Card>& bottom);
 
     // 处理叫地主或不叫。
     // seat：座位号。yes：true 为叫。err：失败时写入给玩家看的短句。
@@ -109,9 +112,6 @@ public:
     bool take_call_redeal();
 
 private:
-    // 洗一副牌，发给三家各 17 张，留 3 张底牌。无参数。无返回值。
-    void deal_cards();
-
     // 进入抢地主；若无人可抢则直接亮底牌。无参数。无返回值。
     void begin_rob();
 

@@ -6,3 +6,4 @@ server/cmake-build/
 server/lib/
 server/deploy/bin/
 server/deploy/log/
+config.ini

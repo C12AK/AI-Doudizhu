@@ -43,6 +43,9 @@ add_executable(ddz-server
     table.cpp
     game.cpp
     cards.cpp
+    deepseek_client.cpp
+    deal_eval.cpp
+    deal_assign.cpp
 )
 target_include_directories(ddz-server PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
