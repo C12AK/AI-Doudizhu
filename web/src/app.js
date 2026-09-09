@@ -8,10 +8,12 @@
   let springIntro = false;
   let dragOn = false;
   let dragAdd = true;
+  let hallQuery = "";
+  let hallPage = "list";
 
   const ranks = { 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "10", 11: "J", 12: "Q", 13: "K", 14: "A", 15: "2" };
   const suits = ["♠", "♥", "♣", "♦"];
-  const phases = { lobby: "大厅", call: "叫地主", rob: "抢地主", double: "加倍", play: "出牌", settle: "结算" };
+  const phases = { hall: "大厅", lobby: "准备", call: "叫地主", rob: "抢地主", double: "加倍", play: "出牌", settle: "结算", set_over: "大局结束" };
 
   function savedUser() { return sessionStorage.getItem("ddz_user") || ""; }
   function savedPass() { return sessionStorage.getItem("ddz_pass") || ""; }
@@ -70,9 +72,16 @@
     state = null;
     selected.clear();
     $("view-game").hidden = true;
+    $("view-hall").hidden = true;
+    $("view-create").hidden = true;
     $("view-login").hidden = false;
     $("settle").hidden = true;
+    $("set-board").hidden = true;
     $("spring-flash").hidden = true;
+    hallQuery = "";
+    hallPage = "list";
+    const q = $("room-search");
+    if (q) q.value = "";
   }
 
   function doLogin() {
@@ -116,7 +125,7 @@
             sessionStorage.removeItem("ddz_user");
             sessionStorage.removeItem("ddz_pass");
             showLogin();
-            toast("已离开房间");
+            toast("已退出登录");
             return;
           }
           if (msg.op === "error") {
@@ -126,6 +135,7 @@
           if (msg.op === "abort") {
             toast(msg.reason || "连接已断开");
             selected.clear();
+            springIntro = false;
           }
           if (msg.op === "deal") {
             selected.clear();
@@ -154,17 +164,149 @@
     act.appendChild(b);
   }
 
+  function matchLabel(st) {
+    const total = st.match_total || 1;
+    const done = st.match_done || 0;
+    const playing = st.phase === "call" || st.phase === "rob" || st.phase === "double" || st.phase === "play";
+    const finished = playing ? Math.max(0, done - 1) : done;
+    return `${finished}/${total}`;
+  }
+
+  function showAfterSpring(needSpring, modalEl, stillValid) {
+    const flash = $("spring-flash");
+    if (needSpring && !springIntro) {
+      springIntro = true;
+      modalEl.hidden = true;
+      $("spring-text").textContent = state.spring === "spring" ? "春天 ×2" : "反春 ×2";
+      flash.hidden = false;
+      setTimeout(() => {
+        flash.hidden = true;
+        if (stillValid()) modalEl.hidden = false;
+      }, 1600);
+    } else if (needSpring && flash && !flash.hidden) {
+      modalEl.hidden = true;
+    } else {
+      modalEl.hidden = false;
+    }
+  }
+
+  function nameWeight(s) {
+    let n = 0;
+    for (const ch of s) {
+      n += ch.codePointAt(0) <= 0x7F ? 1 : 2;
+    }
+    return n;
+  }
+
+  function roomMatches(r, q) {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    const name = String(r.name || "").toLowerCase();
+    const id = String(r.id || "").toLowerCase();
+    return name.indexOf(needle) >= 0 || id.indexOf(needle) >= 0;
+  }
+
+  function fillRoomList() {
+    const list = $("room-list");
+    list.innerHTML = "";
+    const rooms = (state.rooms || []).filter((r) => roomMatches(r, hallQuery));
+    if (!(state.rooms || []).length) {
+      list.innerHTML = '<p class="hint">暂无房间</p>';
+      return;
+    }
+    if (!rooms.length) {
+      list.innerHTML = '<p class="hint">没有符合条件的房间</p>';
+      return;
+    }
+    rooms.forEach((r) => {
+      const n = r.n || 0;
+      const full = n >= 3;
+      const status = full ? "已满" : (r.busy ? "游戏中" : "等待中");
+      const row = document.createElement("div");
+      row.className = "room-card" + (full ? " full" : "");
+      row.innerHTML = `<div class="room-card-left"><div class="room-card-name">${r.name || ""}</div><div class="room-card-id">${r.id}</div></div><div class="room-card-right"><div class="room-card-matches">${r.match_total}局</div><div class="room-card-status">${status}</div></div>`;
+      row.onclick = () => {
+        if (full) {
+          toast("房间已满");
+          return;
+        }
+        send({ op: "enter_room", room_id: String(r.id) });
+      };
+      list.appendChild(row);
+    });
+  }
+
+  function showHallList() {
+    hallPage = "list";
+    $("view-login").hidden = true;
+    $("view-game").hidden = true;
+    $("view-create").hidden = true;
+    $("view-hall").hidden = false;
+    fillRoomList();
+  }
+
+  function showCreatePage() {
+    hallPage = "create";
+    $("view-login").hidden = true;
+    $("view-game").hidden = true;
+    $("view-hall").hidden = true;
+    $("view-create").hidden = false;
+  }
+
+  function renderHall() {
+    $("settle").hidden = true;
+    $("set-board").hidden = true;
+    $("spring-flash").hidden = true;
+    springIntro = false;
+    $("hall-user").textContent = state.username || savedUser();
+    fillRoomList();
+    if (hallPage === "create") {
+      showCreatePage();
+      return;
+    }
+    showHallList();
+  }
+
+  function renderBoard() {
+    const board = $("set-board");
+    const items = [];
+    (state.seats || []).forEach((s, i) => {
+      if (!s.occupied) return;
+      items.push({ name: s.username, score: s.set_score || 0, i });
+    });
+    items.sort((a, b) => b.score - a.score);
+    $("board-list").innerHTML = items.map((x) => {
+      const sc = x.score > 0 ? `+${x.score}` : String(x.score);
+      return `<div class="board-row"><span>${x.name}</span><span>${sc}</span></div>`;
+    }).join("");
+    showAfterSpring(
+      state.spring === "spring" || state.spring === "anti",
+      board,
+      () => state && state.phase === "set_over" && state.can_close_board
+    );
+  }
+
   function render() {
-    if (!state || state.you < 0 || state.op === "error") {
+    if (!state || state.op === "error") {
+      return;
+    }
+    if (state.phase === "hall" || state.op === "hall") {
+      renderHall();
+      return;
+    }
+    if (state.you < 0) {
       return;
     }
     $("view-login").hidden = true;
+    $("view-hall").hidden = true;
+    $("view-create").hidden = true;
     $("view-game").hidden = false;
+    hallPage = "list";
 
     const you = state.you;
     const seats = state.seats || [];
     const me = seats[you] || {};
-    $("meta").textContent = `${me.username || ""} · 座位${you + 1} · ${phases[state.phase] || state.phase}`;
+    $("meta").textContent = `${state.room_name || ""} ${state.room_id || ""} · ${me.username || ""} · 座位${you + 1} · ${phases[state.phase] || state.phase} · ${matchLabel(state)}`;
     $("mult").textContent = `倍数 ×${state.public_mult || 1}`;
 
     $("seats").innerHTML = "";
@@ -177,8 +319,12 @@
         return;
       }
       const role = s.role === "landlord" ? "地主" : s.role === "farmer" ? "农民" : "未定";
-      div.innerHTML = `<b>${s.username}</b><br/>${role}<br/>剩 ${s.remain || 0} 张`
-        + (s.ready && state.phase === "lobby" ? "<br/>已准备" : "")
+      const score = s.set_score == null ? 0 : s.set_score;
+      const inHand = state.phase === "call" || state.phase === "rob" || state.phase === "double" || state.phase === "play";
+      const remain = s.remain == null ? 0 : s.remain;
+      div.innerHTML = `<b>${s.username}</b><br/>${role}<br/>得分 ${score}`
+        + (inHand ? `<br/>剩 ${remain} 张` : "")
+        + (s.ready && (state.phase === "lobby" || state.phase === "set_over") ? "<br/>已准备" : "")
         + (s.online === false ? "<br/>断线重连中" : "")
         + (s.doubled ? "<br/>加倍" : "");
       $("seats").appendChild(div);
@@ -206,7 +352,12 @@
       lastEl.innerHTML = "";
     }
 
-    fillCards($("hand"), state.hand, { selectable: true });
+    const handIds = state.hand || [];
+    const inHand = new Set(handIds);
+    Array.from(selected).forEach((id) => {
+      if (!inHand.has(id)) selected.delete(id);
+    });
+    fillCards($("hand"), handIds, { selectable: true });
 
     const act = $("actions");
     act.innerHTML = "";
@@ -227,41 +378,38 @@
     if (state.can_play) {
       addBtn(act, "出牌", () => {
         send({ op: "play", cards: Array.from(selected) });
-        selected.clear();
       });
     }
-    if (state.can_pass) addBtn(act, "不出", () => { send({ op: "pass" }); selected.clear(); }, true);
+    if (state.can_pass) addBtn(act, "不出", () => send({ op: "pass" }), true);
 
     const settle = $("settle");
+    const board = $("set-board");
     const flash = $("spring-flash");
-    if (state.phase === "settle") {
+    const showSmallSettle = state.phase === "lobby" && state.match_done > 0 && state.can_ready;
+    if (showSmallSettle) {
+      board.hidden = true;
       const sc = state.score || 0;
       $("settle-title").textContent = sc > 0 ? `得分 +${sc}` : `得分 ${sc}`;
       $("settle-detail").hidden = true;
       $("settle-detail").textContent = "";
-      $("btn-again").disabled = !state.can_again;
-
-      const needSpring = state.spring === "spring" || state.spring === "anti";
-      if (needSpring && !springIntro) {
-        springIntro = true;
-        settle.hidden = true;
-        $("spring-text").textContent = state.spring === "spring" ? "春天 ×2" : "反春 ×2";
-        flash.hidden = false;
-        setTimeout(() => {
-          flash.hidden = true;
-          if (state && state.phase === "settle") {
-            settle.hidden = false;
-          }
-        }, 1600);
-      } else if (needSpring && flash && !flash.hidden) {
-        settle.hidden = true;
-      } else {
-        settle.hidden = false;
-      }
+      $("btn-settle-ready").disabled = !state.can_ready;
+      showAfterSpring(
+        state.spring === "spring" || state.spring === "anti",
+        settle,
+        () => state && state.phase === "lobby" && state.match_done > 0 && state.can_ready
+      );
+    } else if (state.phase === "set_over" && state.can_close_board) {
+      settle.hidden = true;
+      renderBoard();
     } else {
       settle.hidden = true;
-      flash.hidden = true;
-      springIntro = false;
+      board.hidden = true;
+      if (state.phase !== "set_over") {
+        flash.hidden = true;
+        if (state.phase !== "lobby" || !state.match_done) {
+          springIntro = false;
+        }
+      }
     }
   }
 
@@ -313,8 +461,49 @@
     doLogin();
   };
   $("btn-register").onclick = () => toast("该功能暂未上线");
-  $("btn-again").onclick = () => send({ op: "again" });
-  $("btn-leave").onclick = $("btn-leave-settle").onclick = () => send({ op: "leave" });
+  $("btn-settle-ready").onclick = () => send({ op: "ready" });
+  $("btn-leave").onclick = $("btn-leave-settle").onclick = $("btn-leave-board").onclick = () => send({ op: "leave_room" });
+  $("btn-logout").onclick = () => send({ op: "logout" });
+  $("btn-create-room").onclick = () => {
+    if (state && (state.phase === "hall" || state.op === "hall")) {
+      showCreatePage();
+    }
+  };
+  $("btn-create-back").onclick = () => {
+    if (state && (state.phase === "hall" || state.op === "hall")) {
+      showHallList();
+    }
+  };
+  $("btn-close-board").onclick = () => send({ op: "close_board" });
+  $("form-create").onsubmit = (e) => {
+    e.preventDefault();
+    const name = $("room-name").value.trim();
+    if (!name) {
+      toast("房间名不合法");
+      return;
+    }
+    if (nameWeight(name) > 60) {
+      toast("房间名不能超过60字符（一个汉字算2字符）");
+      return;
+    }
+    const matchCount = Number($("match-count").value);
+    if (!Number.isInteger(matchCount) || matchCount < 1 || matchCount > 99) {
+      toast("局数不合法");
+      return;
+    }
+    send({
+      op: "create_room",
+      name,
+      match_count: matchCount
+    });
+  };
+  $("form-search").onsubmit = (e) => {
+    e.preventDefault();
+    hallQuery = $("room-search").value.trim();
+    if (state && (state.phase === "hall" || state.op === "hall") && hallPage === "list") {
+      fillRoomList();
+    }
+  };
 
   connect();
 })();

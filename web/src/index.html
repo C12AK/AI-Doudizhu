@@ -21,6 +21,33 @@
     </form>
   </section>
 
+  <section id="view-hall" class="view" hidden>
+    <header class="topbar">
+      <div id="hall-user"></div>
+      <div class="topbar-right">
+        <button id="btn-create-room" type="button">创建房间</button>
+        <button id="btn-logout" type="button" class="ghost">退出登录</button>
+      </div>
+    </header>
+    <form id="form-search" class="hall-search">
+      <input id="room-search" maxlength="60" autocomplete="off" placeholder="搜索房间名或房间号" />
+      <button type="submit">搜索</button>
+    </form>
+    <div id="room-list" class="room-list"></div>
+  </section>
+
+  <section id="view-create" class="view" hidden>
+    <header class="topbar">
+      <button id="btn-create-back" type="button" class="ghost">返回</button>
+    </header>
+    <form id="form-create">
+      <h1>创建房间</h1>
+      <label>房间名<input id="room-name" maxlength="60" autocomplete="off" placeholder="请输入不超过60字符（一个汉字算2字符）" /></label>
+      <label>局数<input id="match-count" type="number" min="1" max="99" value="8" /></label>
+      <button type="submit">确认创建</button>
+    </form>
+  </section>
+
   <section id="view-game" class="view" hidden>
     <header class="topbar">
       <div id="meta"></div>
@@ -52,8 +79,17 @@
     <div class="panel">
       <h2 id="settle-title"></h2>
       <p id="settle-detail"></p>
-      <button id="btn-again" type="button">再来</button>
+      <button id="btn-settle-ready" type="button">准备</button>
       <button id="btn-leave-settle" type="button" class="ghost">离开</button>
+    </div>
+  </div>
+
+  <div id="set-board" class="modal" hidden>
+    <div class="panel">
+      <h2>得分榜</h2>
+      <div id="board-list"></div>
+      <button id="btn-close-board" type="button">关闭得分榜</button>
+      <button id="btn-leave-board" type="button" class="ghost">离开</button>
     </div>
   </div>
 

@@ -10,6 +10,7 @@ body {
   background: #1b4d2e;
   color: #f4f1de;
   min-height: 100%;
+  height: 100%;
 }
 
 .view {
@@ -18,18 +19,31 @@ body {
   padding: 16px;
 }
 
-#view-login {
+#view-login,
+#view-hall,
+#view-create {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+#view-login {
   padding-top: 48px;
 }
 
-#form-login {
+#view-hall {
+  height: 100%;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+#form-login,
+#form-create {
   display: contents;
 }
 
-#view-login label {
+#view-login label,
+#view-create label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -51,7 +65,14 @@ body {
   background: #7eb8da;
 }
 
+#view-create h1 {
+  font-size: 28px;
+  margin: 8px 0 4px;
+}
+
 #view-login input,
+#view-hall input,
+#view-create input,
 button {
   font-size: 16px;
   padding: 10px 12px;
@@ -96,10 +117,102 @@ button.ghost {
   gap: 8px;
 }
 
-#btn-leave {
+#btn-leave,
+#btn-logout,
+#btn-create-room,
+#btn-create-back {
   min-height: 36px;
   padding: 6px 12px;
   font-size: 14px;
+}
+
+.room-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.room-card {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  min-height: 76px;
+}
+
+.room-card.full {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.room-card-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.room-card-name {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-card-id {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.room-card-right {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.room-card-matches,
+.room-card-status {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.room-card-status {
+  margin-top: 4px;
+}
+
+.hall-search {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.hall-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hall-search button {
+  flex: 0 0 auto;
+  min-width: 88px;
+}
+
+#board-list {
+  text-align: left;
+  margin: 12px 0;
+}
+
+.board-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 16px;
 }
 
 .seats {
