@@ -1,9 +1,9 @@
 ops-scripts/env.sh
 .env
 doudizhu-image.tar.gz
-web/deploy/www/
+deploy/
+config.ini
 server/cmake-build/
 server/lib/
-server/deploy/bin/
-server/deploy/log/
-config.ini
+server/deploy/
+web/deploy/

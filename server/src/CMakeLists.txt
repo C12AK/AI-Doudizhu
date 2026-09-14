@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(ddz-server CXX)
 
 set(DDZ_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+get_filename_component(REPO_ROOT "${DDZ_ROOT}/.." ABSOLUTE)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -60,5 +61,5 @@ target_link_libraries(ddz-server PRIVATE
     pthread
 )
 set_target_properties(ddz-server PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${DDZ_ROOT}/deploy/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${REPO_ROOT}/deploy/bin"
 )

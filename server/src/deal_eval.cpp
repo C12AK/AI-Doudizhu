@@ -1,25 +1,26 @@
 #include "deal_eval.h"
 
-#include "deal_assign.h"
 #include "log_record.h"
 
 #include <cctype>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <sstream>
 
 namespace {
 
-const char* kSystemPrompt =
-    "你是斗地主发牌平衡裁判。你会看到三副各 17 张的手牌（不含尚未亮出的底牌）。"
-    "请判断这三副牌的实力差距是否大到会破坏对局体验。"
-    "建议（供你参考，最终由你判断）："
-    "可接受——三家都有一定牌力，差距属于正常开局的强弱差"
-    "（例如一家多一对 2、另一家多一张单王，或炸弹数量只差一个）。"
-    "应重发——某一家明显碾压（例如独占火箭且另有多个 2 或炸弹，而另外两家几乎没有大牌），"
-    "或两家极弱一家极强，导致另外两家几乎没有叫地主或对抗的空间。"
-    "只回答 YES 或 NO。"
-    "YES 表示差距过大、需要重新发牌。"
-    "NO 表示可以接受、不必重发。";
+const char* kFallbackPrompt =
+    "你从 5 种斗地主发牌方案中选一种。只输出 PICK 和空格和 1 到 5 的编号。";
+
+// 读出文本文件全部内容。path：文件路径。成功返回正文；打不开返回空串。
+std::string read_file(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) {
+        return {};
+    }
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
 
 // 把一张牌写成点数记号，不含花色。c：牌编号。返回如 3、10、X、D。
 std::string rank_token(ddz::Card c) {
@@ -46,25 +47,58 @@ std::string format_hand(const std::vector<ddz::Card>& hand) {
     return oss.str();
 }
 
-// 从模型回复文本里读 YES/NO。
+// 洗一副牌，切成三手 17 张和 3 张底牌。无参数。返回未分座位的一副。
+DealtPack shuffle_one() {
+    DealtPack pack;
+    auto deck = ddz::full_deck();
+    ddz::shuffle_deck(deck);
+
+    for (int s = 0; s < 3; ++s) {
+        pack.hands[static_cast<std::size_t>(s)].assign(deck.begin() + s * 17, deck.begin() + (s + 1) * 17);
+        ddz::sort_hand(pack.hands[static_cast<std::size_t>(s)]);
+    }
+
+    pack.bottom.assign(deck.begin() + 51, deck.end());
+    return pack;
+}
+
+// 把五种方案编成用户消息。cands：五种发牌。dice：0～9，写入提示里的骰子。
+// 返回给模型看的正文。
+std::string format_user(const std::array<DealtPack, DealEval::kChoices>& cands, int dice) {
+    std::ostringstream oss;
+    oss << "骰子：" << dice << "\n";
+    for (int i = 0; i < DealEval::kChoices; ++i) {
+        oss << "\n方案" << (i + 1) << "：\n";
+        oss << "手牌甲：" << format_hand(cands[static_cast<std::size_t>(i)].hands[0]) << "\n";
+        oss << "手牌乙：" << format_hand(cands[static_cast<std::size_t>(i)].hands[1]) << "\n";
+        oss << "手牌丙：" << format_hand(cands[static_cast<std::size_t>(i)].hands[2]) << "\n";
+    }
+    return oss.str();
+}
+
+// 从模型回复里读出 1～5 的方案编号。
 // text：choices[0].message.content。
-// 返回：YES 为 true，NO 为 false；认不出则为空。
-std::optional<bool> parse_yes_no(const std::string& text) {
-    std::string tok;
+// 返回：1～5；认不出则为空。
+std::optional<int> parse_pick(const std::string& text) {
+    std::string upper;
+    upper.reserve(text.size());
     for (unsigned char c : text) {
-        if (std::isalpha(c)) {
-            tok.push_back(static_cast<char>(std::toupper(c)));
-        } else if (!tok.empty()) {
-            break;
+        upper.push_back(static_cast<char>(std::toupper(c)));
+    }
+
+    std::size_t from = 0;
+    auto pick = upper.find("PICK");
+    if (pick != std::string::npos) {
+        from = pick + 4;
+    }
+
+    for (std::size_t i = from; i < text.size(); ++i) {
+        char c = text[i];
+        if (c >= '1' && c <= '0' + DealEval::kChoices) {
+            return c - '0';
         }
     }
 
-    if (tok == "YES") {
-        return true;
-    }
-    if (tok == "NO") {
-        return false;
-    }
     return std::nullopt;
 }
 
@@ -72,65 +106,46 @@ std::optional<bool> parse_yes_no(const std::string& text) {
 
 DealEval::DealEval(const Config& cfg)
     : client_(cfg.deepseek_url, cfg.deepseek_apikey, cfg.deepseek_model) {
+    const std::string path = cfg.resolve("deal_prompt.txt");
+    prompt_ = read_file(path);
+    if (prompt_.empty()) {
+        log_warn("deal prompt missing, use fallback: " + path);
+        prompt_ = kFallbackPrompt;
+    }
     if (!client_.configured()) {
         log_warn("deepseek not configured, skip deal eval");
     }
 }
 
-bool DealEval::accept(const std::array<std::vector<ddz::Card>, 3>& hands) const {
+DealtPack DealEval::pick() const {
+    std::array<DealtPack, kChoices> cands;
+    for (int i = 0; i < kChoices; ++i) {
+        cands[static_cast<std::size_t>(i)] = shuffle_one();
+    }
+
     if (!client_.configured()) {
-        return true;
+        log_ai("skip, deepseek not configured, use scheme 1");
+        return cands[0];
     }
 
-    std::ostringstream user;
-    user << "手牌1：" << format_hand(hands[0]) << "\n";
-    user << "手牌2：" << format_hand(hands[1]) << "\n";
-    user << "手牌3：" << format_hand(hands[2]);
-
-    log_debug("deal eval hands:\n" + user.str());
-    auto content = client_.chat(kSystemPrompt, user.str());
+    const int dice = ddz::random_int(0, 9);
+    const std::string user = format_user(cands, dice);
+    log_ai("request\n" + user);
+    auto content = client_.chat(prompt_, user);
     if (!content) {
-        log_warn("deal eval call failed, keep current deal");
-        return true;
+        log_ai("response failed, fallback scheme 1");
+        log_warn("deal pick call failed, use scheme 1");
+        return cands[0];
     }
 
-    auto yn = parse_yes_no(*content);
-    if (!yn) {
-        log_warn("deal eval reply is not YES/NO: " + *content);
-        return true;
+    log_ai("response " + *content);
+    auto n = parse_pick(*content);
+    if (!n) {
+        log_ai("parse fail, fallback scheme 1");
+        log_warn("deal pick reply is not PICK 1-5: " + *content);
+        return cands[0];
     }
 
-    if (*yn) {
-        log_info("deal eval YES, reshuffle");
-        return false;
-    }
-
-    log_info("deal eval NO, keep");
-    return true;
-}
-
-DealtPack DealEval::make(const std::array<int, 3>& scores) const {
-    constexpr int kMaxTries = 4;
-    DealtPack pack;
-
-    for (int t = 1; t <= kMaxTries; ++t) {
-        auto deck = ddz::full_deck();
-        ddz::shuffle_deck(deck);
-
-        for (int s = 0; s < 3; ++s) {
-            pack.hands[static_cast<std::size_t>(s)].assign(deck.begin() + s * 17, deck.begin() + (s + 1) * 17);
-            ddz::sort_hand(pack.hands[static_cast<std::size_t>(s)]);
-        }
-
-        pack.bottom.assign(deck.begin() + 51, deck.end());
-
-        if (accept(pack.hands)) {
-            break;
-        }
-        log_info("deal eval reject try=" + std::to_string(t) + "/" + std::to_string(kMaxTries));
-    }
-
-    DealAssign assign;
-    assign.apply(pack.hands, scores);
-    return pack;
+    log_ai("pick=" + std::to_string(*n));
+    return cands[static_cast<std::size_t>(*n - 1)];
 }

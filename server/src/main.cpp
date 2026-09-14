@@ -5,11 +5,31 @@
 #include "table.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <unistd.h>
+
+namespace {
+
+// 默认可执行文件上一级目录里的 config/config.ini。
+// 无参数。能读到 /proc/self/exe 则返回绝对路径，否则返回 config/config.ini。
+std::string default_ini_path() {
+    char buf[4096];
+    ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) {
+        return "config/config.ini";
+    }
+    buf[static_cast<std::size_t>(n)] = '\0';
+    return (std::filesystem::path(buf).parent_path().parent_path() / "config" / "config.ini")
+        .lexically_normal()
+        .string();
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
-    const char* ini = argc > 1 ? argv[1] : "deploy/config/sysparam.ini";
+    const std::string ini = argc > 1 ? argv[1] : default_ini_path();
     Config cfg;
     if (!cfg.load(ini)) {
         std::cerr << "failed to load config: " << ini << "\n";

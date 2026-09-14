@@ -4,11 +4,11 @@
 **/.gitignore
 .cursor
 **/.cursor
+deploy
+server/deploy
+web/deploy
 server/cmake-build
 server/lib
-server/deploy/bin
-server/deploy/log
-web/deploy/www
 server/3rd/json/tests
 server/3rd/json/docs
 server/3rd/json/benchmarks

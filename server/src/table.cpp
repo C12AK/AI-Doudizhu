@@ -1,5 +1,6 @@
 #include "table.h"
 
+#include "deal_assign.h"
 #include "log_record.h"
 
 #include <algorithm>
@@ -231,6 +232,8 @@ void Table::on_retry(const std::string& room_id, int seat) {
 void Table::abort_game(Room& r, const std::string& reason) {
     r.dealing = false;
     r.deal_seq++;
+    r.waiting_prefetch = false;
+    drop_prefetch(r);
     r.game.reset();
     r.match_done = 0;
     r.set_score = {};
@@ -284,6 +287,7 @@ bool Table::match_in_progress(const Room& r) const {
 
 void Table::leave_room(Room& r, int seat, HttpWsServer::ConnId id) {
     log_info("leave room " + r.id + " seat=" + std::to_string(seat));
+    log_player("user=" + at(r, seat).username + " room=" + r.id + " leave seat=" + std::to_string(seat));
     const std::string rid = r.id;
     const bool in_match = match_in_progress(r);
     vacate(r, seat);
@@ -328,12 +332,27 @@ void Table::send_error(HttpWsServer::ConnId id, const std::string& msg) {
     net_.send(id, j.dump());
 }
 
+void Table::log_player_act(HttpWsServer::ConnId id, const std::string& act) {
+    auto it = sessions_.find(id);
+    const std::string who = (it == sessions_.end()) ? "-" : it->second.username;
+    std::string extra;
+    if (it != sessions_.end() && !it->second.room_id.empty()) {
+        extra = " room=" + it->second.room_id;
+    }
+    log_player("user=" + who + extra + " " + act);
+}
+
+void Table::reject(HttpWsServer::ConnId id, const std::string& act, const std::string& err) {
+    log_player_act(id, act + " reject " + err);
+    send_error(id, err);
+}
+
 bool Table::accept_move(HttpWsServer::ConnId id, bool ok, const std::string& err, const std::string& logline) {
     if (!ok) {
-        send_error(id, err);
+        reject(id, logline, err);
         return false;
     }
-    log_info(logline);
+    log_player_act(id, logline);
     return true;
 }
 
@@ -557,6 +576,8 @@ void Table::try_start(Room& r) {
         r.last_score = {};
         r.match_done = 0;
         r.last_spring = "none";
+        r.waiting_prefetch = false;
+        drop_prefetch(r);
         for (auto& s : r.seats) {
             s.board_closed = false;
         }
@@ -565,45 +586,41 @@ void Table::try_start(Room& r) {
     r.match_done++;
     r.last_spring = "none";
     r.last_score = {};
-    begin_async_deal(r, false);
-}
 
-void Table::begin_async_deal(Room& r, bool redeal) {
-    r.dealing = true;
-    r.deal_seq++;
-    const int seq = r.deal_seq;
-    const std::string rid = r.id;
-    const int first = ddz::random_int(0, 2);
-    const std::array<int, 3> scores = r.set_score;
-
-    log_info("room " + rid + (redeal ? " redeal eval" : " dealing eval") + " seq=" + std::to_string(seq));
-    broadcast_state(r, "dealing");
-    broadcast_hall();
-
-    try {
-        std::thread([this, rid, seq, first, scores, redeal]() {
-            DealtPack pack = deal_eval_.make(scores);
-            net_.post([this, rid, seq, first, pack = std::move(pack), redeal]() mutable {
-                on_deal_ready(rid, seq, first, std::move(pack), redeal);
-            });
-        }).detach();
-    } catch (const std::exception& e) {
-        r.dealing = false;
-        log_error(std::string("deal thread failed: ") + e.what());
-    }
-}
-
-void Table::on_deal_ready(const std::string& rid, int seq, int first, DealtPack pack, bool redeal) {
-    Room* rp = find_room(rid);
-    if (!rp || rp->deal_seq != seq || !rp->dealing) {
-        log_info("room " + rid + " drop stale deal seq=" + std::to_string(seq));
+    if (r.next_pack) {
+        DealtPack pack = std::move(*r.next_pack);
+        r.next_pack.reset();
+        finish_deal(r, std::move(pack), false);
         return;
     }
 
-    Room& r = *rp;
+    if (r.prefetching) {
+        r.dealing = true;
+        r.waiting_prefetch = true;
+        log_info("room " + r.id + " wait prefetch");
+        broadcast_state(r, "dealing");
+        broadcast_hall();
+        return;
+    }
+
+    begin_async_deal(r, false);
+}
+
+void Table::drop_prefetch(Room& r) {
+    r.prefetch_seq++;
+    r.prefetching = false;
+    r.next_pack.reset();
+}
+
+void Table::finish_deal(Room& r, DealtPack pack, bool redeal) {
+    DealAssign assign;
+    assign.apply(pack.hands, r.set_score);
+
+    const int first = ddz::random_int(0, 2);
     if (redeal) {
         if (!r.game) {
             r.dealing = false;
+            r.waiting_prefetch = false;
             return;
         }
         r.game->start_deal(first, pack.hands, pack.bottom);
@@ -613,21 +630,108 @@ void Table::on_deal_ready(const std::string& rid, int seq, int first, DealtPack 
     }
 
     r.dealing = false;
+    r.waiting_prefetch = false;
     log_info("room " + r.id + " deal " + std::to_string(r.match_done) + "/" +
              std::to_string(r.match_total) + " first_caller=" + at(r, first).username);
     broadcast_state(r, "deal");
     broadcast_hall();
+    start_prefetch(r);
+}
+
+void Table::start_prefetch(Room& r) {
+    if (r.match_done >= r.match_total) {
+        log_info("room " + r.id + " skip prefetch, last game " + std::to_string(r.match_done) + "/" +
+                 std::to_string(r.match_total));
+        return;
+    }
+    if (r.prefetching || r.next_pack) {
+        return;
+    }
+
+    r.prefetching = true;
+    r.prefetch_seq++;
+    const int seq = r.prefetch_seq;
+    const std::string rid = r.id;
+    log_info("room " + rid + " prefetch start seq=" + std::to_string(seq));
+
+    try {
+        std::thread([this, rid, seq]() {
+            DealtPack pack = deal_eval_.pick();
+            net_.post([this, rid, seq, pack = std::move(pack)]() mutable {
+                on_prefetch_ready(rid, seq, std::move(pack));
+            });
+        }).detach();
+    } catch (const std::exception& e) {
+        r.prefetching = false;
+        log_error(std::string("prefetch thread failed: ") + e.what());
+        if (r.dealing && r.waiting_prefetch) {
+            r.waiting_prefetch = false;
+            begin_async_deal(r, false);
+        }
+    }
+}
+
+void Table::on_prefetch_ready(const std::string& rid, int seq, DealtPack pack) {
+    Room* rp = find_room(rid);
+    if (!rp || rp->prefetch_seq != seq) {
+        log_info("room " + rid + " drop stale prefetch seq=" + std::to_string(seq));
+        return;
+    }
+
+    Room& r = *rp;
+    r.prefetching = false;
+    if (r.dealing && r.waiting_prefetch) {
+        finish_deal(r, std::move(pack), false);
+        return;
+    }
+
+    r.next_pack = std::move(pack);
+    log_info("room " + rid + " prefetch ready");
+}
+
+void Table::begin_async_deal(Room& r, bool redeal) {
+    r.dealing = true;
+    r.waiting_prefetch = false;
+    r.deal_seq++;
+    const int seq = r.deal_seq;
+    const std::string rid = r.id;
+
+    log_info("room " + rid + (redeal ? " redeal eval" : " dealing eval") + " seq=" + std::to_string(seq));
+    broadcast_state(r, "dealing");
+    broadcast_hall();
+
+    try {
+        std::thread([this, rid, seq, redeal]() {
+            DealtPack pack = deal_eval_.pick();
+            net_.post([this, rid, seq, pack = std::move(pack), redeal]() mutable {
+                on_deal_ready(rid, seq, std::move(pack), redeal);
+            });
+        }).detach();
+    } catch (const std::exception& e) {
+        r.dealing = false;
+        log_error(std::string("deal thread failed: ") + e.what());
+    }
+}
+
+void Table::on_deal_ready(const std::string& rid, int seq, DealtPack pack, bool redeal) {
+    Room* rp = find_room(rid);
+    if (!rp || rp->deal_seq != seq || !rp->dealing) {
+        log_info("room " + rid + " drop stale deal seq=" + std::to_string(seq));
+        return;
+    }
+
+    finish_deal(*rp, std::move(pack), redeal);
 }
 
 void Table::create_room(HttpWsServer::ConnId id, const Json& msg) {
     auto it = sessions_.find(id);
     if (it == sessions_.end()) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "create_room", "现在不能做该操作");
         return;
     }
     Session& s = it->second;
     if (!s.room_id.empty()) {
-        send_error(id, "已在房间中");
+        reject(id, "create_room", "已在房间中");
         return;
     }
 
@@ -635,21 +739,21 @@ void Table::create_room(HttpWsServer::ConnId id, const Json& msg) {
     int match_count = msg.get_int("match_count", 0);
     int nw = name_weight(name);
     if (name.empty() || nw < 0 || nw > 60) {
-        send_error(id, "房间名不合法");
+        reject(id, "create_room", "房间名不合法");
         return;
     }
     if (match_count < 1 || match_count > 99) {
-        send_error(id, "局数不合法");
+        reject(id, "create_room", "局数不合法");
         return;
     }
     if (name_taken(name)) {
-        send_error(id, "房间名已被使用");
+        reject(id, "create_room", "房间名已被使用");
         return;
     }
 
     std::string rid = alloc_room_id();
     if (rid.empty()) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "create_room", "现在不能做该操作");
         return;
     }
 
@@ -663,6 +767,8 @@ void Table::create_room(HttpWsServer::ConnId id, const Json& msg) {
     int seat = sit_down(r, id, s);
     log_info("create room " + rid + " name=" + name + " matches=" + std::to_string(match_count) +
              " by " + s.username + " seat=" + std::to_string(seat));
+    log_player_act(id, "create_room name=" + name + " matches=" + std::to_string(match_count) +
+                       " seat=" + std::to_string(seat));
     send_state(r, seat, "enter_ok");
     broadcast_hall();
 }
@@ -670,28 +776,29 @@ void Table::create_room(HttpWsServer::ConnId id, const Json& msg) {
 void Table::enter_room(HttpWsServer::ConnId id, const Json& msg) {
     auto it = sessions_.find(id);
     if (it == sessions_.end()) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "enter_room", "现在不能做该操作");
         return;
     }
     Session& s = it->second;
     if (!s.room_id.empty()) {
-        send_error(id, "已在房间中");
+        reject(id, "enter_room", "已在房间中");
         return;
     }
 
     std::string rid = trim_copy(msg.get_str("room_id"));
     Room* r = find_room(rid);
     if (!r) {
-        send_error(id, "房间不存在");
+        reject(id, "enter_room", "房间不存在");
         return;
     }
     if (free_seat(*r) < 0) {
-        send_error(id, "房间已满");
+        reject(id, "enter_room", "房间已满");
         return;
     }
 
     int seat = sit_down(*r, id, s);
     log_info("enter room " + rid + " " + s.username + " seat=" + std::to_string(seat));
+    log_player_act(id, "enter_room seat=" + std::to_string(seat));
     send_state(*r, seat, "enter_ok");
     broadcast_state(*r, phase_name(*r));
     broadcast_hall();
@@ -709,7 +816,7 @@ void Table::on_message(HttpWsServer::ConnId id, const std::string& payload) {
 
     Json msg = Json::parse(payload);
     if (!msg.ok() || !msg.contains("op")) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "bad_message", "现在不能做该操作");
         return;
     }
 
@@ -723,14 +830,17 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
     }
 
     if (op == "login") {
-        auto acc = db_.login(msg.get_str("username"), msg.get_str("password"));
+        const std::string username = msg.get_str("username");
+        auto acc = db_.login(username, msg.get_str("password"));
         if (!acc) {
+            log_player("user=" + username + " login fail");
             send_error(id, "用户名或密码错误");
             return;
         }
 
         for (const auto& [cid, s] : sessions_) {
             if (cid != id && s.account_id == acc->id) {
+                log_player("user=" + acc->username + " login reject already online");
                 send_error(id, "该账号已在线");
                 return;
             }
@@ -747,6 +857,7 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
             auto& st = at(*exist.room, exist.seat);
             if (st.online) {
                 sessions_.erase(id);
+                log_player("user=" + acc->username + " login reject already online");
                 send_error(id, "该账号已在线");
                 return;
             }
@@ -754,6 +865,8 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
             attach(*exist.room, exist.seat, id);
             log_info("reconnect " + acc->username + " room " + exist.room->id +
                      " seat=" + std::to_string(exist.seat));
+            log_player("user=" + acc->username + " login reconnect room=" + exist.room->id +
+                       " seat=" + std::to_string(exist.seat));
             send_state(*exist.room, exist.seat, "login_ok");
             broadcast_state(*exist.room, phase_name(*exist.room));
             broadcast_hall();
@@ -761,17 +874,19 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
         }
 
         log_info("login " + acc->username + " hall");
+        log_player("user=" + acc->username + " login hall");
         send_hall(id);
         return;
     }
 
     auto sit = sessions_.find(id);
     if (sit == sessions_.end()) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "op=" + op, "现在不能做该操作");
         return;
     }
 
     if (op == "logout") {
+        log_player_act(id, "logout");
         Located loc = locate_conn(id);
         sessions_.erase(id);
         if (loc.room && loc.seat >= 0) {
@@ -794,7 +909,7 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
 
     Located loc = locate_conn(id);
     if (!loc.room || loc.seat < 0) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "op=" + op, "现在不能做该操作");
         return;
     }
     Room& r = *loc.room;
@@ -808,44 +923,47 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
     std::string err;
     if (op == "close_board") {
         if (!r.set_over || at(r, seat).board_closed) {
-            send_error(id, "现在不能做该操作");
+            reject(id, "close_board", "现在不能做该操作");
             return;
         }
         at(r, seat).board_closed = true;
+        log_player_act(id, "close_board");
         broadcast_state(r, "set_over");
         return;
     }
     if (op == "ready") {
         if (r.game || r.dealing) {
-            send_error(id, "现在不能做该操作");
+            reject(id, "ready", "现在不能做该操作");
             return;
         }
         if (r.set_over && !at(r, seat).board_closed) {
-            send_error(id, "现在不能做该操作");
+            reject(id, "ready", "现在不能做该操作");
             return;
         }
         at(r, seat).ready = true;
+        log_player_act(id, "ready");
         broadcast_state(r, phase_name(r));
         try_start(r);
         return;
     }
     if (op == "unready") {
         if (r.game || r.dealing) {
-            send_error(id, "现在不能做该操作");
+            reject(id, "unready", "现在不能做该操作");
             return;
         }
         at(r, seat).ready = false;
+        log_player_act(id, "unready");
         broadcast_state(r, phase_name(r));
         return;
     }
 
     if (r.dealing) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "op=" + op, "现在不能做该操作");
         return;
     }
 
     if (!r.game) {
-        send_error(id, "现在不能做该操作");
+        reject(id, "op=" + op, "现在不能做该操作");
         return;
     }
 
@@ -885,7 +1003,7 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
         std::vector<ddz::Card> cards;
         for (int x : msg.get_ints("cards")) {
             if (x < 0 || x > 53) {
-                send_error(id, illegal());
+                reject(id, "play", illegal());
                 return;
             }
             cards.push_back(static_cast<ddz::Card>(x));
@@ -906,7 +1024,7 @@ void Table::handle(HttpWsServer::ConnId id, const Json& msg) {
         return;
     }
 
-    send_error(id, "现在不能做该操作");
+    reject(id, "op=" + op, "现在不能做该操作");
 }
 
 void Table::heartbeat() {
@@ -926,7 +1044,8 @@ void Table::heartbeat() {
         }
         Session& s = it->second;
         if (now - s.last_seen > timeout) {
-            log_warn("heartbeat timeout conn=" + std::to_string(cid));
+            log_warn("heartbeat timeout conn=" + std::to_string(cid) + " user=" + s.username);
+            log_player("user=" + s.username + " heartbeat timeout");
             Located loc = locate_conn(cid);
             if (loc.room && loc.seat >= 0) {
                 begin_retry(*loc.room, loc.seat);

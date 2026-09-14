@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -59,6 +60,10 @@ private:
         std::unique_ptr<Game> game;
         bool dealing = false;
         int deal_seq = 0;
+        bool waiting_prefetch = false;
+        bool prefetching = false;
+        int prefetch_seq = 0;
+        std::optional<DealtPack> next_pack;
     };
 
     struct Session {
@@ -108,6 +113,12 @@ private:
 
     // 给该连接回一句错误。id：连接编号。msg：给玩家看的短句。无返回值。
     void send_error(HttpWsServer::ConnId id, const std::string& msg);
+
+    // 在玩家日志里记一条带用户名的操作。id：连接。act：操作说明。无返回值。
+    void log_player_act(HttpWsServer::ConnId id, const std::string& act);
+
+    // 记失败操作并回错误。id：连接。act：操作说明。err：给玩家看的短句。无返回值。
+    void reject(HttpWsServer::ConnId id, const std::string& act, const std::string& err);
 
     // 拼房间列表给大厅。s：该玩家会话。返回可发出去的对象。
     Json hall_snapshot(const Session& s) const;
@@ -173,16 +184,29 @@ private:
     // 进入已有房间。id：连接。msg：含 room_id。无返回值。
     void enter_room(HttpWsServer::ConnId id, const Json& msg);
 
-    // 三人在线且都准备则开始异步发牌（新的一小局）。r：房间。无返回值。
+    // 三人在线且都准备则开始发牌（新的一小局）。r：房间。无返回值。
     void try_start(Room& r);
 
-    // 在后台洗牌并问 AI，完成后回到网络线程套牌。
+    // 丢掉未用的预取和进行中的预取请求。r：房间。无返回值。
+    void drop_prefetch(Room& r);
+
+    // 把一副未分座位的牌按当前得分发给三家并开叫地主。
+    // r：房间。pack：AI 选出的牌。redeal：是否流局重发。无返回值。
+    void finish_deal(Room& r, DealtPack pack, bool redeal);
+
+    // 若不是大局最后一小局，则在后台为下一小局预取一副牌。r：房间。无返回值。
+    void start_prefetch(Room& r);
+
+    // 预取完成。rid：房间号。seq：这次预取的序号。pack：选出的牌。无返回值。
+    void on_prefetch_ready(const std::string& rid, int seq, DealtPack pack);
+
+    // 当场洗牌并问 AI（第一小局、预取未就绪、或流局重发）。
     // r：房间。redeal：true 表示流局重发，不增加小局计数。无返回值。
     void begin_async_deal(Room& r, bool redeal);
 
-    // 后台发牌完成。rid：房间号。seq：这次发牌的序号。first：首叫座位。
-    // pack：已评估并按得分分好的牌。redeal：是否流局重发。无返回值。
-    void on_deal_ready(const std::string& rid, int seq, int first, DealtPack pack, bool redeal);
+    // 当场评估完成。rid：房间号。seq：这次发牌的序号。
+    // pack：选出的牌。redeal：是否流局重发。无返回值。
+    void on_deal_ready(const std::string& rid, int seq, DealtPack pack, bool redeal);
 
     // 检查有没有人太久没说话，并向在线连接发探活。无参数。无返回值。
     void heartbeat();

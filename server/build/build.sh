@@ -2,6 +2,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-mkdir -p lib deploy/bin deploy/log
+mkdir -p lib
 cmake -S src -B cmake-build
 cmake --build cmake-build --target ddz-server -j"$(nproc)"
