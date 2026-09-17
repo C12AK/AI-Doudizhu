@@ -9,7 +9,7 @@
 <body>
   <div id="toast" hidden></div>
 
-  <section id="view-login" class="view">
+  <section id="view-login" class="view" hidden>
     <form id="form-login">
       <h1>斗地主</h1>
       <label>账号<input id="username" autocomplete="username" value="" /></label>
@@ -20,6 +20,18 @@
       </div>
     </form>
   </section>
+
+  <section id="view-restore" class="view" hidden>
+    <h1>斗地主</h1>
+    <p class="hint">连接中…</p>
+  </section>
+  <script>
+    (function () {
+      var u = sessionStorage.getItem("ddz_user");
+      var p = sessionStorage.getItem("ddz_pass");
+      document.getElementById(u && p ? "view-restore" : "view-login").hidden = false;
+    })();
+  </script>
 
   <section id="view-hall" class="view" hidden>
     <header class="topbar">

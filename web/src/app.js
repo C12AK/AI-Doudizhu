@@ -69,12 +69,31 @@
     }
   }
 
+  function fillLoginForm() {
+    const u = savedUser();
+    const p = savedPass();
+    if (u) $("username").value = u;
+    if (p) $("password").value = p;
+  }
+
+  function showRestore() {
+    $("view-game").hidden = true;
+    $("view-hall").hidden = true;
+    $("view-create").hidden = true;
+    $("view-login").hidden = true;
+    $("view-restore").hidden = false;
+    $("settle").hidden = true;
+    $("set-board").hidden = true;
+    $("spring-flash").hidden = true;
+  }
+
   function showLogin() {
     state = null;
     selected.clear();
     $("view-game").hidden = true;
     $("view-hall").hidden = true;
     $("view-create").hidden = true;
+    $("view-restore").hidden = true;
     $("view-login").hidden = false;
     $("settle").hidden = true;
     $("set-board").hidden = true;
@@ -83,6 +102,7 @@
     hallPage = "list";
     const q = $("room-search");
     if (q) q.value = "";
+    fillLoginForm();
   }
 
   function doLogin() {
@@ -131,6 +151,7 @@
           }
           if (msg.op === "error") {
             toast(msg.msg || "错误");
+            if (!$("view-restore").hidden) showLogin();
             return;
           }
           if (msg.op === "abort") {
@@ -148,6 +169,7 @@
         ws.onclose = () => {
           if (reconnectLeft <= 0) {
             toast("连接已断开");
+            if (!$("view-restore").hidden) showLogin();
             return;
           }
           reconnectLeft -= 1;
@@ -240,6 +262,7 @@
   function showHallList() {
     hallPage = "list";
     $("view-login").hidden = true;
+    $("view-restore").hidden = true;
     $("view-game").hidden = true;
     $("view-create").hidden = true;
     $("view-hall").hidden = false;
@@ -249,6 +272,7 @@
   function showCreatePage() {
     hallPage = "create";
     $("view-login").hidden = true;
+    $("view-restore").hidden = true;
     $("view-game").hidden = true;
     $("view-hall").hidden = true;
     $("view-create").hidden = false;
@@ -299,6 +323,7 @@
       return;
     }
     $("view-login").hidden = true;
+    $("view-restore").hidden = true;
     $("view-hall").hidden = true;
     $("view-create").hidden = true;
     $("view-game").hidden = false;
@@ -532,5 +557,8 @@
     }
   };
 
+  fillLoginForm();
+  if (savedUser() && savedPass()) showRestore();
+  else showLogin();
   connect();
 })();

@@ -20,6 +20,7 @@ body {
 }
 
 #view-login,
+#view-restore,
 #view-hall,
 #view-create {
   display: flex;
@@ -27,7 +28,8 @@ body {
   gap: 12px;
 }
 
-#view-login {
+#view-login,
+#view-restore {
   padding-top: 48px;
 }
 
