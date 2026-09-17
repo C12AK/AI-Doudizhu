@@ -8,6 +8,7 @@
   let springIntro = false;
   let dragOn = false;
   let dragAdd = true;
+  let dragTouched = new Set();
   let hallQuery = "";
   let hallPage = "list";
 
@@ -440,6 +441,21 @@
     if (on) selected.add(id);
     else selected.delete(id);
     el.classList.toggle("sel", on);
+    if (dragOn) dragTouched.add(id);
+  }
+
+  // 本次加点滑动结束：若划过的牌还不是合法一手，则按双串优先、否则单串收掉多余的牌。
+  function trimSwipeChain() {
+    const raw = Array.from(dragTouched);
+    const kept = DdzCards.keepSwipeChain(raw);
+    if (kept.length === raw.length) return;
+    const keepSet = new Set(kept);
+    raw.forEach((id) => {
+      if (keepSet.has(id)) return;
+      selected.delete(id);
+      const el = hand.querySelector('.card[data-id="' + id + '"]');
+      if (el) el.classList.remove("sel");
+    });
   }
 
   const hand = $("hand");
@@ -449,6 +465,7 @@
     if (!el) return;
     e.preventDefault();
     dragOn = true;
+    dragTouched = new Set();
     dragAdd = !selected.has(Number(el.dataset.id));
     paintSel(el, dragAdd);
     hand.setPointerCapture(e.pointerId);
@@ -458,7 +475,11 @@
     const el = handCardAt(e.clientX);
     if (el) paintSel(el, dragAdd);
   };
-  const dragEnd = () => { dragOn = false; };
+  const dragEnd = () => {
+    if (!dragOn) return;
+    dragOn = false;
+    if (dragAdd) trimSwipeChain();
+  };
   hand.onpointerup = dragEnd;
   hand.onpointercancel = dragEnd;
 
